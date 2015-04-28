@@ -20,13 +20,24 @@
  *                                                                         *
  ***************************************************************************/
 """
+from qgis.utils import iface
 from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication
-from PyQt4.QtGui import QAction, QIcon
+from PyQt4.QtGui import QAction, QIcon, QMessageBox
 # Initialize Qt resources from file resources.py
 import resources_rc
 # Import the code for the dialog
 from carbono_compare_dialog import carbonoCompareDialog
+from qgis.core import *
+from qgis.analysis import QgsRasterCalculator, QgsRasterCalculatorEntry
 import os.path
+from PyQt4.QtCore import QFileInfo
+from PyQt4.QtGui import *
+from qgis.gui import *
+import numpy
+from osgeo import gdal
+import numpy.ma as ma
+from numpy import zeros
+from numpy import logical_and
 
 
 class carbonoCompare:
@@ -177,14 +188,261 @@ class carbonoCompare:
             self.iface.removeToolBarIcon(action)
 
 
+    def __normalizacion(self,bandCom,stdBase,meanBase,stdCom,meanCom):
+        """Realiza la normalizacion radiometrica entre dos bandas"""
+
+        n=meanBase-meanCom*stdBase/stdCom
+        m=stdBase/stdCom
+        bandCom=m*bandCom+n
+        return bandCom
+
+
     def run(self):
         """Run method that performs all the real work"""
         # show the dialog
         self.dlg.show()
+        layers = QgsMapLayerRegistry.instance().mapLayers().values()
+        for layer in layers:
+            if layer.type() == QgsMapLayer.RasterLayer:
+                self.dlg.layerBaseIRCombo.addItem(layer.name(), layer)
+                self.dlg.layerBaseRojoCombo.addItem(layer.name(), layer)
+                self.dlg.layerComIRCombo.addItem(layer.name(), layer)
+                self.dlg.layerComRojoCombo.addItem(layer.name(), layer)
+
         # Run the dialog event loop
         result = self.dlg.exec_()
+        self.iface.mainWindow().statusBar().showMessage( u"Calculando" )
         # See if OK was pressed
         if result:
+            #Se extrae las capas seleccionadas para el calculo de NDVI
+            index = self.dlg.layerBaseIRCombo.currentIndex()
+            irBaseLayer=self.dlg.layerBaseIRCombo.itemData(index)
+            index = self.dlg.layerBaseRojoCombo.currentIndex()
+            rojoBaseLayer=self.dlg.layerBaseRojoCombo.itemData(index)
+
+
+            index = self.dlg.layerComIRCombo.currentIndex()
+            irComLayer=self.dlg.layerComIRCombo.itemData(index)
+            index = self.dlg.layerComRojoCombo.currentIndex()
+            rojoComLayer=self.dlg.layerComRojoCombo.itemData(index)
+
+
+            inDs = gdal.Open(irBaseLayer.source())
+            driver = inDs.GetDriver()
+            bandBaseIrc = inDs.GetRasterBand(1)
+            bandBaseIrc=bandBaseIrc.ReadAsArray()
+            bandBaseIrc=bandBaseIrc.astype(numpy.float)
+
+
+
+            inDs = gdal.Open(irComLayer.source())
+            driver = inDs.GetDriver()
+            bandComIrc = inDs.GetRasterBand(1)
+            bandComIrc=bandComIrc.ReadAsArray()
+            bandComIrc=bandComIrc.astype(numpy.float)
+
+
+            inDs = gdal.Open(rojoBaseLayer.source())
+            driver = inDs.GetDriver()
+            bandBaseRojo = inDs.GetRasterBand(1)
+            bandBaseRojo=bandBaseRojo.ReadAsArray()
+            bandBaseRojo=bandBaseRojo.astype(numpy.float)
+
+
+            inDs = gdal.Open(rojoComLayer.source())
+            driver = inDs.GetDriver()
+            bandComRojo = inDs.GetRasterBand(1)
+            bandComRojo=bandComRojo.ReadAsArray()
+            bandComRojo=bandComRojo.astype(numpy.float)
+
+
+            path="/home/santiago/ndvi.tif"
+            outDataset = driver.Create(str(path),inDs.RasterXSize,inDs.RasterYSize,1,gdal.GDT_Float32)
+
+
+            inDs = gdal.Open(rojoComLayer.source())
+            driver = inDs.GetDriver()
+            mascaraDeCambio = inDs.GetRasterBand(1)
+            mascaraDeCambio=mascaraDeCambio.ReadAsArray()
+            #zeramos nuestra matriz de cambio
+            #decremento=2,incremento=1,no cambio=0
+            mascaraDeCambio[mascaraDeCambio==mascaraDeCambio]=1
+            iterar=True
+
+            #inicializamos los parametros estadisticos para la primera iteracion
+            stdBaseIrc = bandBaseIrc.std()
+            meanBaseIrc = bandBaseIrc.mean()
+            stdComIrc = bandComIrc.std()
+            meanComIrc = bandComIrc.mean()
+
+
+            stdBaseRojo = bandBaseRojo.std()
+            meanBaseRojo = bandBaseRojo.mean()
+            stdComRojo = bandComRojo.std()
+            meanComRojo = bandComRojo.mean()
+
+            difA = bandBaseIrc - bandBaseRojo
+            difA[difA==0]=-1.0
+            sumA = bandBaseIrc + bandBaseRojo
+            sumA[sumA==0]=-1.0
+            ndviBase= difA / sumA
+            meanAnterior=0.0
+
+            indice=0
+            while iterar:
+                indice=+indice
+
+                bandircNorm=self.__normalizacion(bandComIrc,stdBaseIrc,meanBaseIrc,stdComIrc,meanComIrc)
+                bandredNorm=self.__normalizacion(bandComRojo,stdBaseRojo,meanBaseRojo,stdComRojo,meanComRojo)
+
+
+
+
+                difA = bandircNorm - bandredNorm
+                difA[difA==0]=-1.0
+                sumA = bandircNorm + bandredNorm
+                sumA[sumA==0]=-1.0
+
+                ndviCom = difA / sumA
+
+                del difA
+                del sumA
+
+                ndviChange= 1.0 * (ndviCom*100/ndviBase)
+
+                #1=perdida: 2=ganancia: 3=igual
+                ndviChange[ndviChange<80.0]=1.0
+                ndviChange[ndviChange>120.0]=2.0
+                ndviChange[(ndviChange!=1.0) & (ndviChange!=2.0)]=3.0
+
+
+                ndviBase[(ndviBase > 0.3) & (ndviBase < 0.8)]=1.0
+                ndviBase[ndviBase != 1.0]= 0.0
+
+                ndviCom[(ndviCom > 0.41572) & (ndviCom < 0.730062)]=1.0
+                ndviCom[ndviCom !=1.0 ]= 0.0
+
+
+                maskForestTemp=ndviBase + ndviCom
+
+
+                maskForestTemp[maskForestTemp > 1.0]=1.0
+
+                del ndviCom
+                del ndviBase
+
+
+                resultado=maskForestTemp * ndviChange
+
+                print "Informe del Analisis"
+                print "Perdida de Vegetacion :" +str(resultado[resultado == 1].size*30.0/10000)+" has."
+                print "Aumento de Vegetacion :" +str(resultado[resultado == 2].size*30.0/10000)+" has."
+                print "Conservacion de Vegetacion :" +str(resultado[resultado == 3].size*30.0/10000)+" has."
+                print "Superficie analizada: "+str(resultado.size*30.0/10000)+" has."
+
+                print "------------------------------------"
+
+                iterar=False
+
+
+                """
+                difNdvi= ndviCom - ndviBase
+                difMean = abs(meanAnterior-difNdvi.mean())
+
+                meanAnterior = difNdvi.mean()
+                desviacion = difNdvi.std()
+                media = difNdvi.mean()
+                n = 1
+                umbralDer = media + n * desviacion
+                umbralIzq = media - n * desviacion
+                difNdvi[difNdvi > umbralDer]= 1
+                difNdvi[difNdvi < umbralIzq]= 2 
+                difNdvi[(difNdvi != 1) & (difNdvi != 2)]= 3
+
+                #print difMean
+                print difMean
+                if difMean < 0.1:
+                    iterar = False
+                    print ndviBase[ndviBase < 1].sum()
+
+                else:
+                    difNdvi[difNdvi != 3] = 0
+
+                    #calcular los parametros estadisticos de la normalizacion para cada banda
+                    mx = ma.masked_array(bandBaseIrc,mask=difNdvi)
+                    stdBaseIrc = bandBaseIrc.std()
+                    meanBaseIrc = mx.mean()
+                    iterar = False
+
+                    mx = ma.masked_array(bandComIrc,mask=difNdvi)
+                    stdComIrc = mx.std()
+                    meanComIrc = mx.mean()
+
+                    mx = ma.masked_array(bandBaseRojo,mask=difNdvi)
+                    stdBaseRojo = mx.std()
+                    meanBaseRojo = mx.mean()
+
+                    mx = ma.masked_array(bandComRojo,mask=difNdvi)
+                    stdComRojo = mx.std()
+                    meanComRojo = mx.mean()
+            """
+
+
+            #print (difNdvi ==1).sum()
+            #print (difNdvi ==2).sum()
+            #print (difNdvi ==3).sum()
+
+            outDataset.SetGeoTransform(inDs.GetGeoTransform())
+            outDataset.SetProjection(inDs.GetProjection())
+
+            outband = outDataset.GetRasterBand(1)
+            outband.SetNoDataValue(-99)
+            outband.WriteArray(resultado)
+            outband.FlushCache()
+
+
+            band = outDataset.GetRasterBand(1)
+
+
+            colDic={'Blanco':'#ffffff','Rojo':'#ff0000', 'Verde':'#00ff00','Azul':'#0000ff'}
+
+            valueList =[2, 1, 3,0]
+            lst = [ QgsColorRampShader.ColorRampItem(valueList[0], QColor(colDic['Verde'])), \
+            QgsColorRampShader.ColorRampItem(valueList[1], QColor(colDic['Rojo'])), \
+            QgsColorRampShader.ColorRampItem(valueList[3], QColor(colDic['Blanco'])), \
+            QgsColorRampShader.ColorRampItem(valueList[2], QColor(colDic['Azul']))]
+
+            myRasterShader = QgsRasterShader()
+            myColorRamp = QgsColorRampShader()
+
+            myColorRamp.setColorRampItemList(lst)
+            myColorRamp.setColorRampType(QgsColorRampShader.INTERPOLATED)
+            myRasterShader.setRasterShaderFunction(myColorRamp)
+
+
+
+
+            # insert the output raster into QGIS interface
+            outputRasterFileInfo = QFileInfo(str(path))
+            baseName = outputRasterFileInfo.baseName()
+            rasterLayer = QgsRasterLayer(str(path), baseName)
+
+            myPseudoRenderer = QgsSingleBandPseudoColorRenderer(\
+            rasterLayer.dataProvider(), rasterLayer.type(),  myRasterShader)
+
+            rasterLayer.setRenderer(myPseudoRenderer)
+
+            if not rasterLayer.isValid():
+                print "Layer failed to load"
+            QgsMapLayerRegistry.instance().addMapLayer(rasterLayer)
+
+            iface.legendInterface().refreshLayerSymbology(rasterLayer)
+
+            #QMessageBox.information(None, 'Raster Scale',"Min %s : Max %s" % ( band1.mean() , bandNorm.mean()))
+            #QMessageBox.information(None, 'Rasssssss',"Min %s : Max %s" % ( band1.std() , bandNorm.std()))
+            #QMessageBox.information(None, 'Rasasdfasdfs',"Min %s : Max %s" % ( band1.std(),numpy.array_equal(band1,bandNorm)))
+
+
             # Do something useful here - delete the line containing pass and
             # substitute with your code.
             pass
