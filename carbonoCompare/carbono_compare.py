@@ -286,28 +286,41 @@ class carbonoCompare:
             sumA = bandBaseIrc + bandBaseRojo
             sumA[sumA==0]=-1.0
             ndviBase= difA / sumA
-            meanAnterior=0.0
+            meanAnterior=1.0
 
             indice=0
             while iterar:
-                indice=+indice
+                indice=indice+1
 
+                print "iteacion= "+str(indice)
+                print stdBaseIrc
+                print meanBaseIrc
+                print stdComIrc
+                print meanComIrc
                 bandircNorm=self.__normalizacion(bandComIrc,stdBaseIrc,meanBaseIrc,stdComIrc,meanComIrc)
+                print "---------------------------------------"
+                print stdBaseRojo
+                print meanBaseRojo
+                print stdComRojo
+                print meanComRojo
                 bandredNorm=self.__normalizacion(bandComRojo,stdBaseRojo,meanBaseRojo,stdComRojo,meanComRojo)
-
-
 
 
                 difA = bandircNorm - bandredNorm
                 difA[difA==0]=-1.0
+
                 sumA = bandircNorm + bandredNorm
                 sumA[sumA==0]=-1.0
+
+                del bandredNorm
+                del bandircNorm
 
                 ndviCom = difA / sumA
 
                 del difA
                 del sumA
 
+                """
                 ndviChange= 1.0 * (ndviCom*100/ndviBase)
 
                 #1=perdida: 2=ganancia: 3=igual
@@ -344,10 +357,11 @@ class carbonoCompare:
 
                 iterar=False
 
-
                 """
+
                 difNdvi= ndviCom - ndviBase
-                difMean = abs(meanAnterior-difNdvi.mean())
+                divMean = 1.0*(difNdvi.mean()*100/meanAnterior)
+
 
                 meanAnterior = difNdvi.mean()
                 desviacion = difNdvi.std()
@@ -360,32 +374,50 @@ class carbonoCompare:
                 difNdvi[(difNdvi != 1) & (difNdvi != 2)]= 3
 
                 #print difMean
-                print difMean
-                if difMean < 0.1:
-                    iterar = False
-                    print ndviBase[ndviBase < 1].sum()
+                print divMean
+                #if 1==1:
+                if (indice != 1) & ((divMean < 1.0) | ((divMean > 100.0) & (divMean < 101.0))):
+                    ndviBase[(ndviBase > 0.3) & (ndviBase < 0.8)]=1.0
+                    ndviBase[ndviBase != 1.0]= 0.0
 
+                    ndviCom[(ndviCom > 0.3) & (ndviCom < 0.8)]=1.0
+                    ndviCom[ndviCom !=1.0 ]= 0.0
+
+
+                    maskForestTemp=ndviBase + ndviCom
+                    del ndviCom
+                    del ndviBase
+
+                    maskForestTemp[maskForestTemp > 1.0]=1.0
+                    resultado=maskForestTemp * difNdvi
+
+                    iterar = False
                 else:
-                    difNdvi[difNdvi != 3] = 0
+                    difNdvi[difNdvi == 3] = 0
+
+                    del ndviCom
 
                     #calcular los parametros estadisticos de la normalizacion para cada banda
-                    mx = ma.masked_array(bandBaseIrc,mask=difNdvi)
-                    stdBaseIrc = bandBaseIrc.std()
+                    """mx = ma.masked_array(bandBaseIrc,mask=difNdvi)
+                    stdBaseIrc = mx.std()
                     meanBaseIrc = mx.mean()
-                    iterar = False
+                    del mx"""
 
                     mx = ma.masked_array(bandComIrc,mask=difNdvi)
                     stdComIrc = mx.std()
                     meanComIrc = mx.mean()
+                    del mx
 
+                    """
                     mx = ma.masked_array(bandBaseRojo,mask=difNdvi)
                     stdBaseRojo = mx.std()
                     meanBaseRojo = mx.mean()
+                    del mx"""
 
                     mx = ma.masked_array(bandComRojo,mask=difNdvi)
                     stdComRojo = mx.std()
                     meanComRojo = mx.mean()
-            """
+                    del mx
 
 
             #print (difNdvi ==1).sum()
