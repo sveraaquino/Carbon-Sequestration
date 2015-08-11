@@ -36,6 +36,8 @@ from qgis.gui import *
 import numpy
 from osgeo import gdal
 import numpy.ma as ma
+import scipy as sp
+from scipy import signal
 from numpy import zeros
 from numpy import logical_and
 
@@ -193,8 +195,16 @@ class carbonoCompare:
 
         n=meanBase-meanCom*stdBase/stdCom
         m=stdBase/stdCom
+
+        print '@@@@@@@@@@@@'
+        print 'n'
+        print n
+        print 'm'
+        print m
+        print '@@@@@@@@@@@@'
         bandCom=m*bandCom+n
         return bandCom
+
 
 
     def run(self):
@@ -256,7 +266,7 @@ class carbonoCompare:
             bandComRojo=bandComRojo.astype(numpy.float)
 
 
-            path="/home/santiago/ndvi.tif"
+            path="/home/santiago/resultados/cambio.tif"
             outDataset = driver.Create(str(path),inDs.RasterXSize,inDs.RasterYSize,1,gdal.GDT_Float32)
 
 
@@ -282,35 +292,38 @@ class carbonoCompare:
             meanComRojo = bandComRojo.mean()
 
             difA = bandBaseIrc - bandBaseRojo
-            difA[difA==0]=-1.0
+            difA[difA==0]=0.001
             sumA = bandBaseIrc + bandBaseRojo
-            sumA[sumA==0]=-1.0
+            sumA[sumA==0]=0.001
             ndviBase= difA / sumA
+
+            #umbral para vegetacion determinado
+            ndviUmbral= abs(ndviBase.mean()-0.05923288)
             meanAnterior=1.0
 
             indice=0
             while iterar:
                 indice=indice+1
 
-                print "iteacion= "+str(indice)
-                print stdBaseIrc
-                print meanBaseIrc
-                print stdComIrc
-                print meanComIrc
+                #print "iteacion= "+str(indice)
+                #print stdBaseIrc
+                #print meanBaseIrc
+                #print stdComIrc
+                #print meanComIrc
                 bandircNorm=self.__normalizacion(bandComIrc,stdBaseIrc,meanBaseIrc,stdComIrc,meanComIrc)
                 print "---------------------------------------"
-                print stdBaseRojo
-                print meanBaseRojo
-                print stdComRojo
-                print meanComRojo
+                #print stdBaseRojo
+                #print meanBaseRojo
+                #print stdComRojo
+                #print meanComRojo
                 bandredNorm=self.__normalizacion(bandComRojo,stdBaseRojo,meanBaseRojo,stdComRojo,meanComRojo)
 
 
                 difA = bandircNorm - bandredNorm
-                difA[difA==0]=-1.0
+                difA[difA==0]=0.001
 
                 sumA = bandircNorm + bandredNorm
-                sumA[sumA==0]=-1.0
+                sumA[sumA==0]=0.001
 
                 del bandredNorm
                 del bandircNorm
@@ -320,67 +333,40 @@ class carbonoCompare:
                 del difA
                 del sumA
 
-                """
-                ndviChange= 1.0 * (ndviCom*100/ndviBase)
-
-                #1=perdida: 2=ganancia: 3=igual
-                ndviChange[ndviChange<80.0]=1.0
-                ndviChange[ndviChange>120.0]=2.0
-                ndviChange[(ndviChange!=1.0) & (ndviChange!=2.0)]=3.0
-
-
-                ndviBase[(ndviBase > 0.3) & (ndviBase < 0.8)]=1.0
-                ndviBase[ndviBase != 1.0]= 0.0
-
-                ndviCom[(ndviCom > 0.41572) & (ndviCom < 0.730062)]=1.0
-                ndviCom[ndviCom !=1.0 ]= 0.0
-
-
-                maskForestTemp=ndviBase + ndviCom
-
-
-                maskForestTemp[maskForestTemp > 1.0]=1.0
-
-                del ndviCom
-                del ndviBase
-
-
-                resultado=maskForestTemp * ndviChange
-
-                print "Informe del Analisis"
-                print "Perdida de Vegetacion :" +str(resultado[resultado == 1].size*30.0/10000)+" has."
-                print "Aumento de Vegetacion :" +str(resultado[resultado == 2].size*30.0/10000)+" has."
-                print "Conservacion de Vegetacion :" +str(resultado[resultado == 3].size*30.0/10000)+" has."
-                print "Superficie analizada: "+str(resultado.size*30.0/10000)+" has."
-
-                print "------------------------------------"
-
-                iterar=False
-
-                """
 
                 difNdvi= ndviCom - ndviBase
-                divMean = 1.0*(difNdvi.mean()*100/meanAnterior)
+                divMean = abs(1.0*(difNdvi.mean()*100/meanAnterior))
 
 
+                print ndviCom.mean()
+                print ndviBase.mean()
+                print meanAnterior
+                print difNdvi.mean()
+                print divMean
                 meanAnterior = difNdvi.mean()
                 desviacion = difNdvi.std()
                 media = difNdvi.mean()
-                n = 1
+                n = 1.5
                 umbralDer = media + n * desviacion
                 umbralIzq = media - n * desviacion
+                difNdviAux = difNdvi
                 difNdvi[difNdvi > umbralDer]= 1
-                difNdvi[difNdvi < umbralIzq]= 2 
+                difNdvi[difNdvi < umbralIzq]= 2
                 difNdvi[(difNdvi != 1) & (difNdvi != 2)]= 3
 
+
                 #print difMean
-                print divMean
+
+
+
                 #if 1==1:
-                if (indice != 1) & ((divMean < 1.0) | ((divMean > 100.0) & (divMean < 101.0))):
-                    ndviBase[(ndviBase > 0.3) & (ndviBase < 0.8)]=1.0
+                if (indice != 1) & ((divMean < 1.0) | ((divMean > 99.0) & (divMean < 101.0))):
+                    ndviBaseCopia = ndviBase
+                    ndviBase[(ndviBase > ndviUmbral) & (ndviBase < 1)]=1.0
                     ndviBase[ndviBase != 1.0]= 0.0
 
-                    ndviCom[(ndviCom > 0.3) & (ndviCom < 0.8)]=1.0
+
+                    ndviCom[(ndviCom > ndviUmbral) & (ndviCom < 1)]=1.0
                     ndviCom[ndviCom !=1.0 ]= 0.0
 
 
@@ -389,7 +375,62 @@ class carbonoCompare:
                     del ndviBase
 
                     maskForestTemp[maskForestTemp > 1.0]=1.0
-                    resultado=maskForestTemp * difNdvi
+
+
+                    prere=maskForestTemp * difNdvi
+                    del maskForestTemp
+                    del difNdvi
+
+
+
+                    resultado = sp.signal.medfilt(prere,3)
+                    #resultado = prere
+                    del prere
+                    resultado[(resultado == 1) | (resultado == 3)] = 1
+                    resultado[resultado == 2] = 3
+                    resultado[resultado == 0] = 2
+
+
+                    #carbono = 4.33+30.1*ndvi =>r2=0.509
+                    #carbono2-carbono1 = 30.1(ndvi1 - ndvi2)
+                    """como la resolucion espacial es de 30m entonces la relacion del pixel seria de 900m2 => 0.09 * Toneladas Carbono/ha.
+                    entonces nuestra ecuacion final queda carbono2-carbono1 = 30.1*(ndvi1 - ndvi2) * 0.09
+                    """
+
+                    carbono = (4.33+30.1*ndviBaseCopia)*0.09
+                    del ndviBaseCopia
+
+                    maskCarbono =  resultado
+                    maskCarbono[maskCarbono == 1]=0
+
+                    mx = ma.masked_array(carbono,mask=maskCarbono)
+                    totalVegetacion = mx.sum()
+
+                    del mx
+                    del carbono
+                    del maskCarbono
+
+
+                    # carbono = 30.1*difNdviAux*0.09
+                    carbono = 2.709*difNdviAux
+                    del difNdviAux
+                    maskCarbono =  resultado
+                    maskCarbono[maskCarbono == 3]=0
+                    mx = ma.masked_array(carbono,mask=maskCarbono)
+                    totalVegPerd = mx.sum()
+
+                    del mx
+                    del carbono
+                    del maskCarbono
+
+
+                    print "Contabilizaciones"
+                    print 'Secuestrado:'
+                    print totalVegetacion
+                    print 'Perdido:'
+                    print totalVegPerd
+
+
 
                     iterar = False
                 else:
@@ -418,6 +459,7 @@ class carbonoCompare:
                     stdComRojo = mx.std()
                     meanComRojo = mx.mean()
                     del mx
+                    del difNdvi
 
 
             #print (difNdvi ==1).sum()
@@ -436,13 +478,12 @@ class carbonoCompare:
             band = outDataset.GetRasterBand(1)
 
 
-            colDic={'Blanco':'#ffffff','Rojo':'#ff0000', 'Verde':'#00ff00','Azul':'#0000ff'}
+            colDic={'Rojo':'#ff0000', 'Verde':'#00ff00','Azul':'#0000ff'}
 
-            valueList =[2, 1, 3,0]
+            valueList =[1, 2, 3]
             lst = [ QgsColorRampShader.ColorRampItem(valueList[0], QColor(colDic['Verde'])), \
-            QgsColorRampShader.ColorRampItem(valueList[1], QColor(colDic['Rojo'])), \
-            QgsColorRampShader.ColorRampItem(valueList[3], QColor(colDic['Blanco'])), \
-            QgsColorRampShader.ColorRampItem(valueList[2], QColor(colDic['Azul']))]
+            QgsColorRampShader.ColorRampItem(valueList[1], QColor(colDic['Azul'])), \
+            QgsColorRampShader.ColorRampItem(valueList[2], QColor(colDic['Rojo']))]
 
             myRasterShader = QgsRasterShader()
             myColorRamp = QgsColorRampShader()
