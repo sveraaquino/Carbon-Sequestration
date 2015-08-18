@@ -346,10 +346,10 @@ class carbonoCompare:
                 meanAnterior = difNdvi.mean()
                 desviacion = difNdvi.std()
                 media = difNdvi.mean()
-                n = 1.5
+                n = 2
                 umbralDer = media + n * desviacion
                 umbralIzq = media - n * desviacion
-                difNdviAux = difNdvi
+                difNdviAux = difNdvi*1
                 difNdvi[difNdvi > umbralDer]= 1
                 difNdvi[difNdvi < umbralIzq]= 2
                 difNdvi[(difNdvi != 1) & (difNdvi != 2)]= 3
@@ -361,7 +361,6 @@ class carbonoCompare:
 
                 #if 1==1:
                 if (indice != 1) & ((divMean < 1.0) | ((divMean > 99.0) & (divMean < 101.0))):
-                    ndviBaseCopia = ndviBase
                     ndviBase[(ndviBase > ndviUmbral) & (ndviBase < 1)]=1.0
                     ndviBase[ndviBase != 1.0]= 0.0
 
@@ -390,6 +389,9 @@ class carbonoCompare:
                     resultado[resultado == 2] = 3
                     resultado[resultado == 0] = 2
 
+                    resultado[(resultado == 1) | (resultado == 2)] = 1
+                    resultado[resultado == 3] = 2
+
 
                     #carbono = 4.33+30.1*ndvi =>r2=0.509
                     #carbono2-carbono1 = 30.1(ndvi1 - ndvi2)
@@ -397,25 +399,17 @@ class carbonoCompare:
                     entonces nuestra ecuacion final queda carbono2-carbono1 = 30.1*(ndvi1 - ndvi2) * 0.09
                     """
 
-                    carbono = (4.33+30.1*ndviBaseCopia)*0.09
-                    del ndviBaseCopia
+                    maskCarbono =  resultado*1
+                    maskCarbono[maskCarbono == 2]=0
 
-                    maskCarbono =  resultado
-                    maskCarbono[maskCarbono == 1]=0
-
-                    mx = ma.masked_array(carbono,mask=maskCarbono)
-                    totalVegetacion = mx.sum()
-
-                    del mx
-                    del carbono
-                    del maskCarbono
+                    print "-+++++++++++++++++++++++++++++-"
+                    print maskCarbono.mean()
+                    print resultado.mean()
 
 
                     # carbono = 30.1*difNdviAux*0.09
                     carbono = 2.709*difNdviAux
                     del difNdviAux
-                    maskCarbono =  resultado
-                    maskCarbono[maskCarbono == 3]=0
                     mx = ma.masked_array(carbono,mask=maskCarbono)
                     totalVegPerd = mx.sum()
 
@@ -425,11 +419,8 @@ class carbonoCompare:
 
 
                     print "Contabilizaciones"
-                    print 'Secuestrado:'
-                    print totalVegetacion
-                    print 'Perdido:'
+                    print 'Carbono no secuestrado:'
                     print totalVegPerd
-
 
 
                     iterar = False
@@ -478,12 +469,12 @@ class carbonoCompare:
             band = outDataset.GetRasterBand(1)
 
 
-            colDic={'Rojo':'#ff0000', 'Verde':'#00ff00','Azul':'#0000ff'}
+            colDic={'Rojo':'#ff0000', 'Gris':'#d8d8d8','Azul':'#0000ff'}
 
             valueList =[1, 2, 3]
-            lst = [ QgsColorRampShader.ColorRampItem(valueList[0], QColor(colDic['Verde'])), \
-            QgsColorRampShader.ColorRampItem(valueList[1], QColor(colDic['Azul'])), \
-            QgsColorRampShader.ColorRampItem(valueList[2], QColor(colDic['Rojo']))]
+            lst = [ QgsColorRampShader.ColorRampItem(valueList[0], QColor(colDic['Gris']),'No Perdida Veg.'), \
+            #QgsColorRampShader.ColorRampItem(valueList[1], QColor(colDic['Azul'])), \
+            QgsColorRampShader.ColorRampItem(valueList[1], QColor(colDic['Rojo']),'Perdida Veg.('+str(abs(totalVegPerd))+' ton C.)')]
 
             myRasterShader = QgsRasterShader()
             myColorRamp = QgsColorRampShader()
